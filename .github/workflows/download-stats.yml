@@ -1,0 +1,37 @@
+# Once a day, records the cumulative download count of every release asset in
+# stats/downloads.csv (date, tag, asset, downloads). GitHub only reports running
+# totals; this file turns them into a history.
+name: Download stats
+
+on:
+  schedule:
+    - cron: "17 3 * * *"   # daily, 03:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Append today's counts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          today=$(date -u +%F)
+          file=stats/downloads.csv
+          [ -f "$file" ] || echo "date,tag,asset,downloads" > "$file"
+          grep -q "^$today," "$file" && { echo "already recorded $today"; exit 0; }
+          gh api "repos/${{ github.repository }}/releases" --paginate \
+            --jq '.[] | .tag_name as $t | .assets[] | [$t, .name, .download_count] | @csv' \
+            | sed "s/^/$today,/" >> "$file"
+          tail -n 5 "$file"
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add stats/downloads.csv
+          git diff --cached --quiet || git commit -m "Download stats $(date -u +%F)"
+          git push
